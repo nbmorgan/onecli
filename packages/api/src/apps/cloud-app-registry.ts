@@ -64,14 +64,6 @@ export const cloudApps: AppDefinition[] = [
     available: false,
   },
   {
-    id: "zoom",
-    name: "Zoom",
-    icon: "/icons/zoom.svg",
-    description: "Meetings, webinars, and cloud recordings.",
-    connectionMethod: { type: "cloud_only" },
-    available: false,
-  },
-  {
     id: "sentry",
     name: "Sentry",
     icon: "/icons/sentry.svg",
