@@ -1,0 +1,105 @@
+import type { AppPermissionDefinition } from "./types";
+
+export const zoomPermissions: AppPermissionDefinition = {
+  provider: "zoom",
+  groups: [
+    {
+      category: "read",
+      tools: [
+        {
+          id: "get_me",
+          name: "Get current user",
+          description: "Retrieve the connected account's user profile",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/users/me",
+          method: "GET",
+        },
+        {
+          id: "list_users",
+          name: "List users",
+          description: "List users on the account",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/users",
+          method: "GET",
+        },
+        {
+          id: "list_meetings",
+          name: "List meetings",
+          description: "List scheduled meetings for a user",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/users/*/meetings",
+          method: "GET",
+        },
+        {
+          id: "get_meeting",
+          name: "Get meeting",
+          description: "Retrieve meeting details",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/meetings/*",
+          method: "GET",
+        },
+        {
+          id: "get_past_meeting",
+          name: "Get past meeting",
+          description: "Retrieve details and participants of past meetings",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/past_meetings/*",
+          method: "GET",
+        },
+        {
+          id: "list_recordings",
+          name: "List recordings",
+          description: "List cloud recordings for a user",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/users/*/recordings",
+          method: "GET",
+        },
+        {
+          id: "get_meeting_recordings",
+          name: "Get meeting recordings",
+          description: "Retrieve recordings and transcripts for a meeting",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/meetings/*/recordings",
+          method: "GET",
+        },
+      ],
+    },
+    {
+      category: "write",
+      tools: [
+        {
+          id: "create_meeting",
+          name: "Create meeting",
+          description: "Schedule a new meeting for a user",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/users/*/meetings",
+          method: "POST",
+        },
+        {
+          id: "update_meeting",
+          name: "Update meeting",
+          description: "Update an existing meeting",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/meetings/*",
+          method: "PATCH",
+        },
+        {
+          id: "delete_meeting",
+          name: "Delete meeting",
+          description: "Delete a meeting",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/meetings/*",
+          method: "DELETE",
+        },
+        {
+          id: "delete_recordings",
+          name: "Delete recordings",
+          description: "Delete cloud recordings for a meeting",
+          hostPattern: "api.zoom.us",
+          pathPattern: "/v2/meetings/*/recordings",
+          method: "DELETE",
+        },
+      ],
+    },
+  ],
+};

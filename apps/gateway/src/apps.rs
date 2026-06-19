@@ -1107,6 +1107,27 @@ static APP_PROVIDERS: &[AppProvider] = &[
         finalizer: None,
         body_transform: None,
     },
+    AppProvider {
+        provider: "zoom",
+        display_name: "Zoom",
+        host_rules: &[HostRule {
+            pattern: HostPattern::Exact("api.zoom.us"),
+            path_prefix: None,
+            strategy: AuthStrategy::Bearer,
+            intercept: false,
+            credential_host_field: None,
+        }],
+        // Server-to-Server OAuth tokens expire hourly with no refresh token.
+        // Refresh is handled by the "zoom_s2s" credential type (see
+        // `try_refresh_credentials`), not the standard refresh_token flow.
+        refresh: None,
+        metadata_headers: &[],
+        credential_headers: &[],
+        credential_params: &[],
+        host_rewrite: None,
+        finalizer: None,
+        body_transform: None,
+    },
 ];
 
 // ── Public API ─────────────────────────────────────────────────────────
@@ -1812,8 +1833,73 @@ pub(crate) async fn try_refresh_credentials(
             };
             Some(refresh_docker_hub_token(username, password).await)
         }
+        "zoom_s2s" => {
+            let account_id = creds.get("account_id").and_then(|v| v.as_str());
+            let id = creds.get("client_id").and_then(|v| v.as_str());
+            let secret = creds.get("client_secret").and_then(|v| v.as_str());
+            let (Some(account_id), Some(id), Some(secret)) = (account_id, id, secret) else {
+                return Some(Err(anyhow::anyhow!(
+                    "Zoom S2S credentials incomplete, cannot refresh"
+                )));
+            };
+            Some(refresh_zoom_s2s_token(account_id, id, secret).await)
+        }
         _ => None,
     }
+}
+
+/// Refresh a Zoom Server-to-Server OAuth access token.
+/// Zoom S2S apps use the `account_credentials` grant: client credentials via
+/// Basic auth plus the target account ID. Tokens live one hour and there is
+/// no refresh token — every refresh is a fresh exchange.
+async fn refresh_zoom_s2s_token(
+    account_id: &str,
+    client_id: &str,
+    client_secret: &str,
+) -> anyhow::Result<(String, i64)> {
+    let b64 = base64::engine::general_purpose::STANDARD;
+    let encoded = b64.encode(format!("{client_id}:{client_secret}"));
+
+    let resp = reqwest::Client::new()
+        .post("https://zoom.us/oauth/token")
+        .header("Authorization", format!("Basic {encoded}"))
+        .form(&[
+            ("grant_type", "account_credentials"),
+            ("account_id", account_id),
+        ])
+        .send()
+        .await
+        .map_err(|e| anyhow::anyhow!("Zoom S2S token request failed: {e}"))?;
+
+    let body: serde_json::Value = resp
+        .json()
+        .await
+        .map_err(|e| anyhow::anyhow!("Zoom S2S token response parse failed: {e}"))?;
+
+    let access_token = body
+        .get("access_token")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| {
+            let error = body
+                .get("reason")
+                .or_else(|| body.get("error"))
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+            anyhow::anyhow!("Zoom S2S token exchange failed: {error}")
+        })?
+        .to_string();
+
+    let expires_in = body
+        .get("expires_in")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(3600);
+
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .expect("system clock before UNIX epoch")
+        .as_secs() as i64;
+
+    Ok((access_token, now + expires_in))
 }
 
 async fn refresh_docker_hub_token(username: &str, password: &str) -> anyhow::Result<(String, i64)> {
@@ -3007,6 +3093,41 @@ mod tests {
     #[test]
     fn jfrog_has_no_refresh_config() {
         assert!(refresh_config("jfrog-artifactory").is_none());
+    }
+
+    // ── Zoom ──────────────────────────────────────────────────────────
+
+    #[test]
+    fn provider_for_host_zoom() {
+        let result = provider_for_host("api.zoom.us");
+        assert_eq!(result, Some(("zoom", "Zoom")));
+    }
+
+    #[test]
+    fn zoom_api_uses_bearer() {
+        let injections = build_app_injections("zoom", "api.zoom.us", "zm_test123");
+        assert_eq!(injections.len(), 1);
+        assert_eq!(
+            injections[0],
+            Injection::SetHeader {
+                name: "authorization".to_string(),
+                value: "Bearer zm_test123".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn zoom_has_no_standard_refresh_config() {
+        // Refresh is handled by the "zoom_s2s" credential type, not the
+        // refresh_token flow.
+        assert!(refresh_config("zoom").is_none());
+    }
+
+    #[tokio::test]
+    async fn zoom_s2s_incomplete_credentials_error() {
+        let creds = serde_json::json!({ "account_id": "abc" });
+        let result = try_refresh_credentials("zoom_s2s", &creds, None).await;
+        assert!(matches!(result, Some(Err(_))));
     }
 
     // ── credential_host_field ─────────────────────────────────────────
