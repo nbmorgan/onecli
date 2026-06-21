@@ -56,3 +56,7 @@ apps/gateway/target/
 
 # DD skills (installed per-user via pup)
 .claude/skills/dd-*
+
+# Local repro/tooling artifacts (not for the repo)
+.claude/
+onecli-affine-failure-repro.md
