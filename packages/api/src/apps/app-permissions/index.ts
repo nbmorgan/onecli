@@ -45,6 +45,7 @@ import { mondayPermissions } from "./monday";
 import { vercelPermissions } from "./vercel";
 import { affinePermissions } from "./affine";
 import { zoomPermissions } from "./zoom";
+import { firefliesPermissions } from "./fireflies";
 
 const permissionRegistry = new Map<string, AppPermissionDefinition>();
 
@@ -97,3 +98,4 @@ register(mondayPermissions);
 register(vercelPermissions);
 register(affinePermissions);
 register(zoomPermissions);
+register(firefliesPermissions);

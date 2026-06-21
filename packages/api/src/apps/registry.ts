@@ -41,6 +41,7 @@ import { vercel } from "./vercel";
 import { jfrogArtifactory } from "./jfrog-artifactory";
 import { affine } from "./affine";
 import { zoom } from "./zoom";
+import { fireflies } from "./fireflies";
 
 const staticApps: AppDefinition[] = [
   gmail,
@@ -83,6 +84,7 @@ const staticApps: AppDefinition[] = [
   jfrogArtifactory,
   affine,
   zoom,
+  fireflies,
 ];
 
 const CLOUD_HIDDEN_APPS = new Set(["jfrog-artifactory"]);
