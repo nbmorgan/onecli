@@ -3,8 +3,13 @@ export type {
   AppToolGroup,
   AppPermissionLevel,
   AppPermissionDefinition,
+  ToolConditions,
 } from "./types";
-export { mapRuleActionToPermission, allGroupTools } from "./types";
+export {
+  mapRuleActionToPermission,
+  allGroupTools,
+  serializeToolConditions,
+} from "./types";
 
 import type { AppPermissionDefinition } from "./types";
 import { awsPermissions } from "./aws";

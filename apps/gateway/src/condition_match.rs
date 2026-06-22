@@ -35,9 +35,14 @@
 //!   "query_all":    ["addParents"],                 // all keys present in query
 //!   "query_any":    ["addParents", "removeParents"],// at least one present
 //!   "query_absent": ["addParents", "removeParents"],// none present
-//!   "body_json":    { "mimeType": "application/vnd.google-apps.folder" }
+//!   "body_json":    { "mimeType": "application/vnd.google-apps.folder" },
+//!   "body_json_not":{ "mimeType": "application/vnd.google-apps.folder" }
 //! }
 //! ```
+//!
+//! `body_json` requires every listed field to equal the given value;
+//! `body_json_not` requires at least one listed field to differ (or be absent),
+//! which is how a generic "create file" rule excludes "create folder".
 //!
 //! A rule with no conditions (`conditions_raw = None`) always matches, so existing
 //! rules behave exactly as before.
@@ -55,8 +60,7 @@ pub(crate) fn needs_body_buffer(rules: &[PolicyRule]) -> bool {
     rules.iter().any(|r| {
         r.conditions_raw
             .as_ref()
-            .and_then(|c| c.get("body_json"))
-            .is_some()
+            .is_some_and(|c| c.get("body_json").is_some() || c.get("body_json_not").is_some())
     })
 }
 
@@ -126,15 +130,41 @@ pub(crate) fn matches(rule: &PolicyRule, path: &str, body: Option<&[u8]>) -> boo
         }
     }
 
+    let has_body_clause = obj.contains_key("body_json") || obj.contains_key("body_json_not");
+    let body_obj = if has_body_clause {
+        match body.and_then(|b| serde_json::from_slice::<Value>(b).ok()) {
+            Some(Value::Object(map)) => Some(map),
+            _ => None,
+        }
+    } else {
+        None
+    };
+
     if let Some(fields) = obj.get("body_json").and_then(Value::as_object) {
-        let parsed: Option<Value> = body.and_then(|b| serde_json::from_slice(b).ok());
-        let Some(Value::Object(body_obj)) = parsed else {
-            // Body absent or not a JSON object → a body_json clause cannot hold.
+        // Every listed field must be present and equal → e.g. folder create.
+        let Some(body_obj) = body_obj.as_ref() else {
             return false;
         };
         for (field, expected) in fields {
             if body_obj.get(field) != Some(expected) {
                 return false;
+            }
+        }
+    }
+
+    if let Some(fields) = obj.get("body_json_not").and_then(Value::as_object) {
+        // At least one listed field must differ or be absent → generic create
+        // (everything that is NOT a folder create).
+        match body_obj.as_ref() {
+            // No JSON body at all trivially satisfies "is not a folder create".
+            None => {}
+            Some(body_obj) => {
+                let any_differs = fields
+                    .iter()
+                    .any(|(field, expected)| body_obj.get(field) != Some(expected));
+                if !any_differs {
+                    return false;
+                }
             }
         }
     }
@@ -187,7 +217,9 @@ mod tests {
 
     #[test]
     fn query_any_matches_move() {
-        let rule = rule_with(Some(json!({ "query_any": ["addParents", "removeParents"] })));
+        let rule = rule_with(Some(
+            json!({ "query_any": ["addParents", "removeParents"] }),
+        ));
         assert!(matches(
             &rule,
             "/drive/v3/files/abc?addParents=folder1",
@@ -202,7 +234,9 @@ mod tests {
 
     #[test]
     fn query_any_does_not_match_plain_update() {
-        let rule = rule_with(Some(json!({ "query_any": ["addParents", "removeParents"] })));
+        let rule = rule_with(Some(
+            json!({ "query_any": ["addParents", "removeParents"] }),
+        ));
         assert!(!matches(&rule, "/drive/v3/files/abc", None));
         assert!(!matches(
             &rule,
@@ -213,7 +247,9 @@ mod tests {
 
     #[test]
     fn query_all_requires_every_key() {
-        let rule = rule_with(Some(json!({ "query_all": ["addParents", "removeParents"] })));
+        let rule = rule_with(Some(
+            json!({ "query_all": ["addParents", "removeParents"] }),
+        ));
         assert!(matches(
             &rule,
             "/drive/v3/files/abc?addParents=x&removeParents=y",
@@ -224,7 +260,9 @@ mod tests {
 
     #[test]
     fn query_absent_blocks_when_param_present() {
-        let rule = rule_with(Some(json!({ "query_absent": ["addParents", "removeParents"] })));
+        let rule = rule_with(Some(
+            json!({ "query_absent": ["addParents", "removeParents"] }),
+        ));
         assert!(matches(&rule, "/drive/v3/files/abc?fields=id", None));
         assert!(!matches(&rule, "/drive/v3/files/abc?addParents=x", None));
     }
@@ -238,6 +276,20 @@ mod tests {
         let file = br#"{"name":"doc.txt","mimeType":"text/plain"}"#;
         assert!(matches(&rule, "/drive/v3/files", Some(folder)));
         assert!(!matches(&rule, "/drive/v3/files", Some(file)));
+    }
+
+    #[test]
+    fn body_json_not_excludes_folder_create() {
+        // Generic "create file" = anything that is NOT a folder create.
+        let rule = rule_with(Some(
+            json!({ "body_json_not": { "mimeType": "application/vnd.google-apps.folder" } }),
+        ));
+        let folder = br#"{"name":"F","mimeType":"application/vnd.google-apps.folder"}"#;
+        let file = br#"{"name":"doc.txt","mimeType":"text/plain"}"#;
+        assert!(!matches(&rule, "/drive/v3/files", Some(folder)));
+        assert!(matches(&rule, "/drive/v3/files", Some(file)));
+        // No JSON body (e.g. multipart upload) is treated as not-a-folder-create.
+        assert!(matches(&rule, "/drive/v3/files", None));
     }
 
     #[test]
@@ -267,10 +319,12 @@ mod tests {
     fn needs_body_buffer_only_for_body_conditions() {
         let query_rule = rule_with(Some(json!({ "query_any": ["addParents"] })));
         let body_rule = rule_with(Some(json!({ "body_json": { "mimeType": "x" } })));
+        let body_not_rule = rule_with(Some(json!({ "body_json_not": { "mimeType": "x" } })));
         let plain_rule = rule_with(None);
         assert!(!needs_body_buffer(&[query_rule.clone()]));
         assert!(!needs_body_buffer(&[plain_rule]));
         assert!(needs_body_buffer(&[body_rule.clone()]));
+        assert!(needs_body_buffer(&[body_not_rule]));
         assert!(needs_body_buffer(&[query_rule, body_rule]));
     }
 }

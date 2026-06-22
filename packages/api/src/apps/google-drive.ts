@@ -13,24 +13,33 @@ export const googleDrive: AppDefinition = {
   description: "Read, create, and manage files and folders.",
   connectionMethod: {
     type: "oauth",
+    // Self-hosted note: the write scope is the full `drive` scope, not the
+    // narrower `drive.file`. `drive.file` only grants access to files the app
+    // itself created or opened, so it cannot move, organize, or edit pre-existing
+    // files/folders — which is exactly what folder workflows (e.g. "move this
+    // existing doc into folder X") require. The copy below is written to match
+    // this broader grant so the consent screen is truthful. If you want a
+    // narrower posture, swap back to `drive.file` and accept that only
+    // OneCLI-created items are writable.
     defaultScopes: [
       "openid",
       "email",
       "profile",
       "https://www.googleapis.com/auth/drive.readonly",
-      "https://www.googleapis.com/auth/drive.file",
+      "https://www.googleapis.com/auth/drive",
     ],
     permissions: [
       {
         scope: "https://www.googleapis.com/auth/drive.readonly",
-        name: "Read files",
-        description: "View and download all your Drive files",
+        name: "Read files and folders",
+        description: "View and download all your Drive files and folders",
         access: "read",
       },
       {
-        scope: "https://www.googleapis.com/auth/drive.file",
-        name: "Manage app files",
-        description: "Create and edit files opened or created by OneCLI",
+        scope: "https://www.googleapis.com/auth/drive",
+        name: "Manage files and folders",
+        description:
+          "Create, edit, move, organize, and delete files and folders in your Drive",
         access: "write",
       },
       {
