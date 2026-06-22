@@ -173,7 +173,7 @@ fn matches_request(rule: &PolicyRule, method: &str, path: &str, body: Option<&[u
             .method
             .as_ref()
             .is_none_or(|m| m.eq_ignore_ascii_case(method))
-        && crate::condition_match::matches(rule, body);
+        && crate::condition_match::matches(rule, path, body);
     if direct {
         return true;
     }
@@ -184,7 +184,7 @@ fn matches_request(rule: &PolicyRule, method: &str, path: &str, body: Option<&[u
         && method.eq_ignore_ascii_case("GET")
         && is_git_push_discovery(path)
     {
-        return crate::condition_match::matches(rule, body);
+        return crate::condition_match::matches(rule, path, body);
     }
     false
 }
@@ -344,6 +344,60 @@ mod tests {
         ];
         assert!(!is_blocked("POST", "/safe/path", None, &rules));
         assert!(is_blocked("POST", "/danger/path", None, &rules));
+    }
+
+    // ── Condition matching (Drive move vs. update) ───────────────────────
+
+    fn cond_block_rule(
+        path: &str,
+        method: Option<&str>,
+        conditions: serde_json::Value,
+    ) -> PolicyRule {
+        PolicyRule {
+            name: "block-drive-move".to_string(),
+            path_pattern: path.to_string(),
+            method: method.map(|m| m.to_string()),
+            action: PolicyAction::Block,
+            conditions_raw: Some(conditions),
+        }
+    }
+
+    #[test]
+    fn drive_move_rule_blocks_parent_change_only() {
+        // A rule scoped to parent mutations (addParents/removeParents) must block
+        // a move but leave a generic metadata PATCH on the same endpoint allowed.
+        let rules = vec![cond_block_rule(
+            "/drive/v3/files/*",
+            Some("PATCH"),
+            serde_json::json!({ "query_any": ["addParents", "removeParents"] }),
+        )];
+        assert!(is_blocked(
+            "PATCH",
+            "/drive/v3/files/abc123?addParents=folder1&removeParents=root",
+            None,
+            &rules
+        ));
+        assert!(!is_blocked(
+            "PATCH",
+            "/drive/v3/files/abc123?fields=id%2Cname",
+            None,
+            &rules
+        ));
+    }
+
+    #[test]
+    fn drive_folder_create_rule_inspects_body() {
+        // Folder create and file create share POST /drive/v3/files; a body_json
+        // mimeType condition separates them.
+        let rules = vec![cond_block_rule(
+            "/drive/v3/files",
+            Some("POST"),
+            serde_json::json!({ "body_json": { "mimeType": "application/vnd.google-apps.folder" } }),
+        )];
+        let folder = br#"{"name":"F","mimeType":"application/vnd.google-apps.folder"}"#;
+        let file = br#"{"name":"f.txt","mimeType":"text/plain"}"#;
+        assert!(is_blocked("POST", "/drive/v3/files", Some(folder), &rules));
+        assert!(!is_blocked("POST", "/drive/v3/files", Some(file), &rules));
     }
 
     // ── Rate limit tests ─────────────────────────────────────────────────
