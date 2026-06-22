@@ -37,6 +37,12 @@ export interface DropboxFolder {
   pathDisplay: string;
 }
 
+export interface GoogleDriveFolder {
+  id: string;
+  name: string;
+  parents?: string[];
+}
+
 export interface Secret {
   id: string;
   name: string;

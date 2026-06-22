@@ -13,7 +13,11 @@ import {
   type RuleCondition,
   type PolicyMode,
 } from "../validations/policy-rule";
-import type { AppTool, AppPermissionLevel } from "../apps/app-permissions";
+import {
+  type AppTool,
+  type AppPermissionLevel,
+  serializeToolConditions,
+} from "../apps/app-permissions";
 import { getRuleActionGate } from "../providers";
 
 export type { CreatePolicyRuleInput, UpdatePolicyRuleInput };
@@ -251,21 +255,61 @@ export const setAppPermissionsService = async (
     pathPattern: string;
     method: string | null;
   }[] = [];
-  const toUpdate: { ruleId: string; action: string }[] = [];
+  const toUpdate: {
+    ruleId: string;
+    action: string;
+    // undefined → leave the rule's conditions untouched; a value (including
+    // Prisma.JsonNull) → overwrite them.
+    conditions?: Prisma.InputJsonValue | typeof Prisma.JsonNull;
+  }[] = [];
   const toDelete: string[] = [];
 
   const conditionsProvided = conditions !== undefined;
 
+  // Conditions to persist for a change. A tool's intrinsic conditions (e.g. the
+  // Google Drive move/folder splits) always win over user-supplied manual
+  // conditions, which do not apply to such tools.
+  const conditionsForCreate = (
+    tool: AppTool,
+  ): Prisma.InputJsonValue | undefined =>
+    (serializeToolConditions(tool.conditions) as
+      | Prisma.InputJsonValue
+      | undefined) ??
+    (conditionsProvided && conditions!.length > 0
+      ? (conditions as unknown as Prisma.InputJsonValue)
+      : undefined);
+
+  const conditionsForUpdate = (
+    tool: AppTool,
+  ): Prisma.InputJsonValue | typeof Prisma.JsonNull | undefined => {
+    const toolConditions = serializeToolConditions(tool.conditions);
+    if (toolConditions) return toolConditions as Prisma.InputJsonValue;
+    if (!conditionsProvided) return undefined;
+    return conditions!.length > 0
+      ? (conditions as unknown as Prisma.InputJsonValue)
+      : Prisma.JsonNull;
+  };
+
   for (const change of changes) {
     const existingRules = existingByToolId.get(change.toolId) ?? [];
+    const hasToolConditions =
+      serializeToolConditions(change.tool.conditions) !== undefined;
 
     if (change.permission === "allow") {
       if (isDenyMode) {
         // Deny mode: "allow" = create an explicit allow rule
         if (existingRules.length > 0) {
           for (const rule of existingRules) {
-            if (rule.action !== "allow" || conditionsProvided) {
-              toUpdate.push({ ruleId: rule.id, action: "allow" });
+            if (
+              rule.action !== "allow" ||
+              conditionsProvided ||
+              hasToolConditions
+            ) {
+              toUpdate.push({
+                ruleId: rule.id,
+                action: "allow",
+                conditions: conditionsForUpdate(change.tool),
+              });
             }
           }
           const existingKeys = new Set(
@@ -302,8 +346,16 @@ export const setAppPermissionsService = async (
       }
     } else if (existingRules.length > 0) {
       for (const rule of existingRules) {
-        if (rule.action !== change.permission || conditionsProvided) {
-          toUpdate.push({ ruleId: rule.id, action: change.permission });
+        if (
+          rule.action !== change.permission ||
+          conditionsProvided ||
+          hasToolConditions
+        ) {
+          toUpdate.push({
+            ruleId: rule.id,
+            action: change.permission,
+            conditions: conditionsForUpdate(change.tool),
+          });
         }
       }
       const existingKeys = new Set(
@@ -345,17 +397,15 @@ export const setAppPermissionsService = async (
         where: { id: update.ruleId },
         data: {
           action: update.action,
-          ...(conditionsProvided
-            ? {
-                conditions:
-                  conditions.length > 0 ? conditions : Prisma.JsonNull,
-              }
+          ...(update.conditions !== undefined
+            ? { conditions: update.conditions }
             : {}),
         },
       });
     }
 
     for (const { change, pathPattern, method } of toCreateRules) {
+      const conditions = conditionsForCreate(change.tool);
       await tx.policyRule.create({
         data: {
           ...scopeCreate(scope),
@@ -371,9 +421,7 @@ export const setAppPermissionsService = async (
             provider,
             toolId: change.toolId,
           },
-          ...(conditionsProvided && conditions.length > 0
-            ? { conditions }
-            : {}),
+          ...(conditions !== undefined ? { conditions } : {}),
         },
       });
     }

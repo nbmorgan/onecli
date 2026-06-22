@@ -5,6 +5,10 @@ import type { ApiEnv } from "../types";
 import { authMiddleware, requireProjectId, auth } from "../middleware/auth";
 import { getApp, getApps } from "../apps/registry";
 import { resolveAppCredentials } from "../apps/resolve-credentials";
+import {
+  listDriveFolders,
+  searchDriveFolders,
+} from "../services/google-drive-service";
 import { getOAuthOrg } from "../providers";
 import {
   signOAuthState,
@@ -807,6 +811,43 @@ export const appRoutes = () => {
     await removeBlocklistRule({ projectId }, ruleId);
     invalidateGatewayCache(c.req.raw);
     return c.body(null, 204);
+  });
+
+  // ── GET /apps/google-drive/folders ── browse Drive folders ────────────
+  // Powers the granular folder-scoping UI. Lists the folder children of
+  // `parentId` ("root" by default) for the given Drive connection. Folder-only;
+  // the UI never has to hand-craft Drive query syntax.
+  app.get("/google-drive/folders", authMiddleware, async (c) => {
+    const auth = c.get("auth");
+    const projectId = requireProjectId(auth);
+    const connectionId = c.req.query("connectionId");
+    if (!connectionId) {
+      return c.json({ error: "connectionId is required" }, 400);
+    }
+    const parentId = c.req.query("parentId") || "root";
+    const folders = await listDriveFolders(
+      { projectId, organizationId: auth.organizationId },
+      connectionId,
+      parentId,
+    );
+    return c.json(folders);
+  });
+
+  // ── GET /apps/google-drive/search-folders ── search Drive folders ─────
+  app.get("/google-drive/search-folders", authMiddleware, async (c) => {
+    const auth = c.get("auth");
+    const projectId = requireProjectId(auth);
+    const connectionId = c.req.query("connectionId");
+    if (!connectionId) {
+      return c.json({ error: "connectionId is required" }, 400);
+    }
+    const q = c.req.query("q") ?? "";
+    const folders = await searchDriveFolders(
+      { projectId, organizationId: auth.organizationId },
+      connectionId,
+      q,
+    );
+    return c.json(folders);
   });
 
   return app;

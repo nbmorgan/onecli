@@ -116,6 +116,64 @@ export const exchangeGoogleCode = async ({
   return { credentials, scopes, metadata };
 };
 
+export interface GoogleTokenRefreshResult {
+  accessToken: string;
+  /** Unix seconds, when known. */
+  expiresAt?: number;
+}
+
+/**
+ * Exchange a Google refresh token for a fresh access token. Shared by any
+ * server-side caller that needs a valid token for a stored Google connection
+ * (e.g. the Drive folder browser). Google does not return a new refresh token
+ * on refresh, so callers keep their existing one.
+ */
+export const refreshGoogleAccessToken = async ({
+  clientId,
+  clientSecret,
+  refreshToken,
+}: {
+  clientId: string;
+  clientSecret: string;
+  refreshToken: string;
+}): Promise<GoogleTokenRefreshResult> => {
+  const res = await fetch("https://oauth2.googleapis.com/token", {
+    method: "POST",
+    headers: { "Content-Type": "application/x-www-form-urlencoded" },
+    body: new URLSearchParams({
+      client_id: clientId,
+      client_secret: clientSecret,
+      refresh_token: refreshToken,
+      grant_type: "refresh_token",
+    }),
+  });
+
+  if (!res.ok) {
+    const errorBody = await res.text();
+    throw new Error(
+      `Google token refresh failed: ${res.status} ${res.statusText} — ${errorBody}`,
+    );
+  }
+
+  const data = (await res.json()) as {
+    access_token?: string;
+    expires_in?: number;
+    error?: string;
+    error_description?: string;
+  };
+
+  if (data.error || !data.access_token) {
+    throw new Error(data.error_description ?? "Failed to refresh Google token");
+  }
+
+  return {
+    accessToken: data.access_token,
+    expiresAt: data.expires_in
+      ? Math.floor(Date.now() / 1000) + data.expires_in
+      : undefined,
+  };
+};
+
 /** Standard BYOC config fields for Google OAuth apps. */
 export const googleConfigFields: OAuthConfigField[] = [
   {
