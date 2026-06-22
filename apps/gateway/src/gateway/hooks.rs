@@ -51,29 +51,57 @@ pub(crate) fn prepare_request(
 }
 
 /// Whether the request guard needs the buffered request body to make a
-/// decision. OSS has no request guard → never buffer.
+/// decision. In this OSS fork the only guard is Google Drive folder scoping,
+/// which needs the body to read a create's target folder (`parents`).
 pub(crate) fn needs_request_body(
-    _rules: &ResolvedRules,
-    _host: &str,
-    _method: &str,
-    _path: &str,
+    rules: &ResolvedRules,
+    host: &str,
+    method: &str,
+    path: &str,
 ) -> bool {
-    false
+    rules.session_policy.is_some() && super::drive_scope::needs_body(host, method, path)
 }
 
+/// Request guard. OSS fork: enforce Google Drive folder scope from the
+/// connection's `session_policy` before forwarding. A request that would write
+/// outside the allowed folders is denied with a 403, matching the policy-block
+/// response shape. Everything else passes through.
 #[allow(clippy::too_many_arguments)]
 pub(crate) async fn pre_forward(
-    _rules: &ResolvedRules,
-    _proxy_ctx: &ProxyContext,
-    _host: &str,
+    rules: &ResolvedRules,
+    proxy_ctx: &ProxyContext,
+    host: &str,
     _cache: &dyn crate::cache::CacheStore,
     _pool: &sqlx::PgPool,
     _injection_count: usize,
-    _method: &str,
-    _path: &str,
+    method: &str,
+    path: &str,
     _headers: &hyper::HeaderMap,
-    _body: Option<&[u8]>,
+    body: Option<&[u8]>,
 ) -> Option<Response<ForwardResponseBody>> {
+    let session_policy = rules.session_policy.as_ref()?;
+    let allowed = super::drive_scope::allowed_folder_ids(session_policy);
+    if let super::drive_scope::ScopeCheck::Deny(reason) =
+        super::drive_scope::check(host, method, path, body, &allowed)
+    {
+        tracing::warn!(
+            method = %method, host = %host, path = %path, reason = %reason,
+            "BLOCKED by Google Drive folder scope"
+        );
+        return Some(super::response::json(
+            hyper::StatusCode::FORBIDDEN,
+            serde_json::json!({
+                "error": "blocked_by_folder_scope",
+                "message": format!(
+                    "Blocked by OneCLI folder scope: {reason}. \
+                     Update the connection's allowed folders in your OneCLI dashboard."
+                ),
+                "method": method,
+                "path": path,
+                "project_id": proxy_ctx.project_id,
+            }),
+        ));
+    }
     None
 }
 

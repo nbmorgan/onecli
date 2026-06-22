@@ -17,6 +17,10 @@ mod body;
 #[cfg(feature = "cloud")]
 #[path = "cloud/response.rs"]
 mod cloud_response;
+// OSS-only: Google Drive folder-scope enforcement. The cloud build enforces
+// granular access via its own request guard, so this is unused there.
+#[cfg(not(feature = "cloud"))]
+mod drive_scope;
 mod finalizers;
 pub(crate) mod forward;
 mod hints;
