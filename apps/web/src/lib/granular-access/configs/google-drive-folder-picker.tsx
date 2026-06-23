@@ -1,10 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { ChevronRight, Folder, Loader2 } from "lucide-react";
+import { Check, ChevronRight, Folder, HardDrive, Loader2 } from "lucide-react";
 import { Button } from "@onecli/ui/components/button";
 import { Input } from "@onecli/ui/components/input";
-import { Checkbox } from "@onecli/ui/components/checkbox";
 import { ScrollArea } from "@onecli/ui/components/scroll-area";
 import { DialogFooter } from "@onecli/ui/components/dialog";
 import { cn } from "@onecli/ui/lib/utils";
@@ -12,9 +11,16 @@ import * as driveApi from "@/lib/api/google-drive";
 import type { GoogleDriveFolder } from "@/lib/api/types";
 import type { PolicyDialogContentProps } from "../types";
 
+/**
+ * A selected folder. `ancestors` is the chain of real folder ids above it (from
+ * the browse breadcrumb at selection time) so the UI can render an
+ * "indeterminate" state on an unselected ancestor without re-walking the tree.
+ * The gateway only reads `id`; allowing a folder allows its whole subtree.
+ */
 interface SelectedFolder {
   id: string;
   name: string;
+  ancestors: string[];
 }
 
 const ROOT = { id: "root", name: "My Drive" };
@@ -25,23 +31,63 @@ const readSelected = (
   const folders = (policy?.folders as unknown[]) ?? [];
   return folders
     .map((f): SelectedFolder | null => {
-      if (typeof f === "string") return { id: f, name: f };
+      if (typeof f === "string") return { id: f, name: f, ancestors: [] };
       if (f && typeof f === "object") {
-        const o = f as { id?: unknown; name?: unknown };
+        const o = f as { id?: unknown; name?: unknown; ancestors?: unknown };
         if (typeof o.id === "string")
-          return { id: o.id, name: typeof o.name === "string" ? o.name : o.id };
+          return {
+            id: o.id,
+            name: typeof o.name === "string" ? o.name : o.id,
+            ancestors: Array.isArray(o.ancestors)
+              ? o.ancestors.filter((a): a is string => typeof a === "string")
+              : [],
+          };
       }
       return null;
     })
     .filter((f): f is SelectedFolder => f !== null);
 };
 
-/**
- * Live Google Drive folder browser for granular-access scoping. Lets the user
- * drill into folders, search by name, and check the folders an agent may use.
- * Selection is stored on the policy as `{ folders: [{ id, name }] }`, which the
- * gateway reads to enforce folder scope (see google-drive-policy.ts).
- */
+type FolderState = "checked" | "covered" | "indeterminate" | "empty";
+
+const STATE_TITLE: Record<FolderState, string> = {
+  checked: "Allowed (this folder and everything inside it)",
+  covered: "Allowed via a selected parent folder",
+  indeterminate: "Contains an allowed subfolder — open to see",
+  empty: "Not allowed",
+};
+
+const StateControl = ({
+  state,
+  onToggle,
+}: {
+  state: FolderState;
+  onToggle: () => void;
+}) => (
+  <button
+    type="button"
+    onClick={onToggle}
+    disabled={state === "covered"}
+    title={STATE_TITLE[state]}
+    aria-label={STATE_TITLE[state]}
+    className={cn(
+      "flex size-4 shrink-0 items-center justify-center rounded border text-[10px] font-bold transition-colors",
+      state === "checked" &&
+        "border-primary bg-primary text-primary-foreground",
+      state === "covered" &&
+        "border-primary/40 bg-primary/40 text-primary-foreground cursor-default",
+      state === "indeterminate" &&
+        "border-muted-foreground/40 text-muted-foreground bg-muted/40",
+      state === "empty" && "border-muted-foreground/40",
+    )}
+  >
+    {(state === "checked" || state === "covered") && (
+      <Check className="size-3" />
+    )}
+    {state === "indeterminate" && "?"}
+  </button>
+);
+
 export const GoogleDriveFolderPicker = ({
   connectionId,
   policy,
@@ -62,6 +108,11 @@ export const GoogleDriveFolderPicker = ({
 
   const current = breadcrumb[breadcrumb.length - 1]!;
   const searching = search.trim().length > 0;
+  // Real folder ids on the path to the items currently shown.
+  const pathIds = breadcrumb.filter((b) => b.id !== ROOT.id).map((b) => b.id);
+  const coveredByAncestor =
+    !searching && selected.some((s) => pathIds.includes(s.id));
+  const allFolders = selected.length === 0;
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -89,11 +140,19 @@ export const GoogleDriveFolderPicker = ({
     onPolicyChange(next.length > 0 ? { folders: next } : {});
   };
 
+  const stateOf = (f: GoogleDriveFolder): FolderState => {
+    if (selected.some((s) => s.id === f.id)) return "checked";
+    if (coveredByAncestor) return "covered";
+    if (selected.some((s) => s.ancestors.includes(f.id)))
+      return "indeterminate";
+    return "empty";
+  };
+
   const toggle = (f: GoogleDriveFolder) => {
     commit(
       selected.some((s) => s.id === f.id)
         ? selected.filter((s) => s.id !== f.id)
-        : [...selected, { id: f.id, name: f.name }],
+        : [...selected, { id: f.id, name: f.name, ancestors: pathIds }],
     );
   };
 
@@ -116,6 +175,21 @@ export const GoogleDriveFolderPicker = ({
           onChange={(e) => setSearch(e.target.value)}
           className="h-8 text-sm"
         />
+
+        {/* All folders (root) — clears any restriction. */}
+        <button
+          type="button"
+          onClick={() => commit([])}
+          className="hover:bg-muted/40 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left"
+        >
+          <StateControl
+            state={allFolders ? "checked" : "empty"}
+            onToggle={() => commit([])}
+          />
+          <HardDrive className="text-muted-foreground size-4 shrink-0" />
+          <span className="flex-1 text-sm font-medium">All folders</span>
+          <span className="text-muted-foreground text-xs">entire Drive</span>
+        </button>
 
         {!searching && (
           <div className="text-muted-foreground flex flex-wrap items-center gap-1 text-xs">
@@ -153,41 +227,34 @@ export const GoogleDriveFolderPicker = ({
             </div>
           ) : (
             <ul className="divide-border/40 divide-y">
-              {items.map((f) => {
-                const checked = selected.some((s) => s.id === f.id);
-                return (
-                  <li
-                    key={f.id}
-                    className="hover:bg-muted/40 flex items-center gap-2 px-2 py-1.5"
-                  >
-                    <Checkbox
-                      checked={checked}
-                      onCheckedChange={() => toggle(f)}
-                      aria-label={`Select ${f.name}`}
-                    />
-                    <Folder className="text-muted-foreground size-4 shrink-0" />
-                    <span className="flex-1 truncate text-sm">{f.name}</span>
-                    {!searching && (
-                      <button
-                        type="button"
-                        onClick={() => openFolder(f)}
-                        className="hover:bg-muted text-muted-foreground rounded p-1"
-                        aria-label={`Open ${f.name}`}
-                      >
-                        <ChevronRight className="size-3.5" />
-                      </button>
-                    )}
-                  </li>
-                );
-              })}
+              {items.map((f) => (
+                <li
+                  key={f.id}
+                  className="hover:bg-muted/40 flex items-center gap-2 px-2 py-1.5"
+                >
+                  <StateControl state={stateOf(f)} onToggle={() => toggle(f)} />
+                  <Folder className="text-muted-foreground size-4 shrink-0" />
+                  <span className="flex-1 truncate text-sm">{f.name}</span>
+                  {!searching && (
+                    <button
+                      type="button"
+                      onClick={() => openFolder(f)}
+                      className="hover:bg-muted text-muted-foreground rounded p-1"
+                      aria-label={`Open ${f.name}`}
+                    >
+                      <ChevronRight className="size-3.5" />
+                    </button>
+                  )}
+                </li>
+              ))}
             </ul>
           )}
         </ScrollArea>
 
         <p className="text-muted-foreground text-xs">
-          {selected.length === 0
-            ? "No folders selected — agent has access to all of Drive."
-            : `${selected.length} folder${selected.length === 1 ? "" : "s"} selected.`}
+          {allFolders
+            ? "All folders — agent has access to the entire Drive."
+            : `${selected.length} folder${selected.length === 1 ? "" : "s"} (and their contents) selected.`}
         </p>
       </div>
 
