@@ -71,18 +71,37 @@ pub(crate) async fn pre_forward(
     rules: &ResolvedRules,
     proxy_ctx: &ProxyContext,
     host: &str,
-    _cache: &dyn crate::cache::CacheStore,
+    cache: &dyn crate::cache::CacheStore,
     _pool: &sqlx::PgPool,
     _injection_count: usize,
     method: &str,
     path: &str,
-    _headers: &hyper::HeaderMap,
+    headers: &hyper::HeaderMap,
     body: Option<&[u8]>,
 ) -> Option<Response<ForwardResponseBody>> {
     let session_policy = rules.session_policy.as_ref()?;
     let allowed = super::drive_scope::allowed_folder_ids(session_policy);
+    if allowed.is_empty() {
+        return None;
+    }
+
+    // Bearer token already injected by `apply_injections`; used to resolve a
+    // target folder's ancestors (subtree scope). No token → resolver fails
+    // closed and out-of-scope writes are denied.
+    let token = bearer_token(headers);
+    let resolver = move |id: String| {
+        let token = token.clone();
+        Box::pin(async move {
+            match token.as_deref() {
+                Some(t) => super::drive_scope::resolve_parents(cache, t, &id).await,
+                None => None,
+            }
+        })
+            as std::pin::Pin<Box<dyn std::future::Future<Output = Option<Vec<String>>> + Send + '_>>
+    };
+
     if let super::drive_scope::ScopeCheck::Deny(reason) =
-        super::drive_scope::check(host, method, path, body, &allowed)
+        super::drive_scope::evaluate(host, method, path, body, &allowed, resolver).await
     {
         tracing::warn!(
             method = %method, host = %host, path = %path, reason = %reason,
@@ -103,6 +122,15 @@ pub(crate) async fn pre_forward(
         ));
     }
     None
+}
+
+/// Extract the bearer token from an `Authorization: Bearer <token>` header.
+fn bearer_token(headers: &hyper::HeaderMap) -> Option<String> {
+    headers
+        .get(hyper::header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .map(str::to_string)
 }
 
 /// Request-body transform hook. OSS: passthrough. The cloud build injects a
