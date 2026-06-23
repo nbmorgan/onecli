@@ -61,11 +61,21 @@ Stored on `agent_app_connections.session_policy`:
 { "folders": [{ "id": "16B14v…", "name": "Blaine & Fritz" }] }
 ```
 
-Enforced by `gateway/drive_scope.rs` in `pre_forward`:
+Enforced by `gateway/drive_scope.rs` in `pre_forward`, with **whole-subtree**
+semantics: a write into any descendant of an allowed folder is permitted. The
+gateway walks the target folder's ancestors via the Drive API (cached 5m) and
+allows if the target or any ancestor is in the allowed set; lookup failures fail
+closed.
 
+- **`root` (My Drive root):** selecting the `root` alias scopes the agent to My
+  Drive's root and its whole subtree, so the agent can create new top-level
+  folders (and anything under them) without re-registering each one. The gateway
+  also resolves the account's canonical root id (`files/root`) and treats it as
+  equivalent to the alias, since a top-level folder's `parents` reports the real
+  id.
 - **Enforced:** move into (`PATCH ?addParents`) and create into
-  (`POST /drive/v3/files` body `parents`) a folder — must be in the allowed set;
-  a create with no in-scope parent is denied.
+  (`POST /drive/v3/files` body `parents`) a folder — target (or an ancestor)
+  must be allowed; a create with no parent is denied unless `root` is allowed.
 - **Not enforced (documented limits):** reads (`GET`) and deletes (`DELETE`)
   identify items by id only (would need a metadata lookup), and multipart
   uploads (`/upload/drive/...`) carry parents outside the JSON body.
