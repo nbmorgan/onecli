@@ -108,10 +108,13 @@ export const GoogleDriveFolderPicker = ({
 
   const current = breadcrumb[breadcrumb.length - 1]!;
   const searching = search.trim().length > 0;
+  const atRoot = breadcrumb.length === 1;
   // Real folder ids on the path to the items currently shown.
   const pathIds = breadcrumb.filter((b) => b.id !== ROOT.id).map((b) => b.id);
+  const rootSelected = selected.some((s) => s.id === ROOT.id);
   const coveredByAncestor =
-    !searching && selected.some((s) => pathIds.includes(s.id));
+    rootSelected ||
+    (!searching && selected.some((s) => pathIds.includes(s.id)));
   const allFolders = selected.length === 0;
 
   const load = useCallback(async () => {
@@ -155,6 +158,16 @@ export const GoogleDriveFolderPicker = ({
         : [...selected, { id: f.id, name: f.name, ancestors: pathIds }],
     );
   };
+
+  const toggleRoot = () =>
+    commit(
+      rootSelected
+        ? selected.filter((s) => s.id !== ROOT.id)
+        : [
+            ...selected,
+            { id: ROOT.id, name: "My Drive (root)", ancestors: [] },
+          ],
+    );
 
   const openFolder = (f: GoogleDriveFolder) => {
     setSearch("");
@@ -210,6 +223,24 @@ export const GoogleDriveFolderPicker = ({
               </span>
             ))}
           </div>
+        )}
+
+        {/* My Drive root — allows the root and its whole subtree, so the agent
+            can create new top-level folders without re-registering them. */}
+        {atRoot && !searching && (
+          <button
+            type="button"
+            onClick={toggleRoot}
+            className="hover:bg-muted/40 flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left"
+          >
+            <StateControl
+              state={rootSelected ? "checked" : "empty"}
+              onToggle={toggleRoot}
+            />
+            <Folder className="text-muted-foreground size-4 shrink-0" />
+            <span className="flex-1 text-sm font-medium">My Drive (root)</span>
+            <span className="text-muted-foreground text-xs">+ new folders</span>
+          </button>
         )}
 
         <ScrollArea className="h-56 rounded-md border">

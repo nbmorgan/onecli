@@ -80,7 +80,7 @@ pub(crate) async fn pre_forward(
     body: Option<&[u8]>,
 ) -> Option<Response<ForwardResponseBody>> {
     let session_policy = rules.session_policy.as_ref()?;
-    let allowed = super::drive_scope::allowed_folder_ids(session_policy);
+    let mut allowed = super::drive_scope::allowed_folder_ids(session_policy);
     if allowed.is_empty() {
         return None;
     }
@@ -89,6 +89,16 @@ pub(crate) async fn pre_forward(
     // target folder's ancestors (subtree scope). No token → resolver fails
     // closed and out-of-scope writes are denied.
     let token = bearer_token(headers);
+
+    // When "root" (My Drive root) is allowed, also allow its canonical id: a
+    // top-level folder's `parents` reports the real root id, not the alias.
+    if allowed.contains(super::drive_scope::ROOT_ALIAS) {
+        if let Some(t) = token.as_deref() {
+            if let Some(root_id) = super::drive_scope::resolve_root_id(cache, t).await {
+                allowed.insert(root_id);
+            }
+        }
+    }
     let resolver = move |id: String| {
         let token = token.clone();
         Box::pin(async move {

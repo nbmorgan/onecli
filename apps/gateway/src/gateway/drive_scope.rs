@@ -45,6 +45,10 @@ use crate::cache::CacheStore;
 const MAX_ANCESTOR_NODES: usize = 50;
 /// TTL for cached folder→parents lookups.
 const PARENTS_CACHE_TTL_SECS: u64 = 300;
+/// Drive's alias for the account's My Drive root. Selecting it scopes the agent
+/// to the root and its whole subtree, so newly-created top-level folders are
+/// automatically in scope without re-registering them.
+pub(crate) const ROOT_ALIAS: &str = "root";
 
 /// Outcome of a folder-scope check.
 #[derive(Debug, PartialEq, Eq)]
@@ -185,6 +189,9 @@ where
     }
     match extract_target(host, method, path, body) {
         Target::Ignore => ScopeCheck::Allow,
+        // A parent-less create lands in My Drive root, which is in scope only
+        // when the root itself is an allowed folder.
+        Target::DenyNoParent if allowed.contains(ROOT_ALIAS) => ScopeCheck::Allow,
         Target::DenyNoParent => ScopeCheck::Deny(
             "create outside the connection's allowed Drive folders (no in-scope parent)",
         ),
@@ -205,6 +212,39 @@ where
 fn drive_client() -> &'static reqwest::Client {
     static CLIENT: OnceLock<reqwest::Client> = OnceLock::new();
     CLIENT.get_or_init(reqwest::Client::new)
+}
+
+/// Resolve the account's real My Drive root folder id (the `root` alias resolves
+/// to this canonical id, which is what a top-level folder's `parents` reports).
+/// Cached aggressively since it is stable per account. Returns `None` on failure.
+pub(crate) async fn resolve_root_id(cache: &dyn CacheStore, token: &str) -> Option<String> {
+    // Key off a non-reversible fingerprint of the token so we don't store the
+    // token itself in the cache, while still being per-account.
+    let key = format!("gdrive:rootid:{}", token_fingerprint(token));
+    if let Some(id) = cache.get_raw(&key).await {
+        return Some(id);
+    }
+    let resp = drive_client()
+        .get("https://www.googleapis.com/drive/v3/files/root?fields=id")
+        .bearer_auth(token)
+        .send()
+        .await
+        .ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let body: Value = resp.json().await.ok()?;
+    let id = body.get("id")?.as_str()?.to_string();
+    cache.set_raw(&key, &id, 86_400).await;
+    Some(id)
+}
+
+/// Cheap, non-reversible fingerprint of an access token for cache keying.
+fn token_fingerprint(token: &str) -> String {
+    use std::hash::{Hash, Hasher};
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    token.hash(&mut h);
+    format!("{:016x}", h.finish())
 }
 
 /// Resolve a folder's parent ids via the Drive API, caching the result. Returns
@@ -458,6 +498,38 @@ mod tests {
         )
         .await;
         assert!(matches!(r, ScopeCheck::Deny(_)));
+    }
+
+    #[tokio::test]
+    async fn root_scope_allows_parentless_create() {
+        // Selecting "root" lets the agent create new top-level folders.
+        let r = evaluate(
+            "www.googleapis.com",
+            "POST",
+            "/drive/v3/files",
+            Some(br#"{"name":"new-top-level"}"#),
+            &allowed(&["root"]),
+            no_lookup(),
+        )
+        .await;
+        assert_eq!(r, ScopeCheck::Allow);
+    }
+
+    #[tokio::test]
+    async fn root_scope_allows_move_into_top_level_via_real_root_id() {
+        // hooks augments the allowed set with the account's real root id; a
+        // top-level folder's parent is that real id.
+        let map = HashMap::from([("toplevel", vec!["0ARealRootId"])]);
+        let r = evaluate(
+            "www.googleapis.com",
+            "PATCH",
+            "/drive/v3/files/x?addParents=toplevel",
+            None,
+            &allowed(&["root", "0ARealRootId"]),
+            resolver(map),
+        )
+        .await;
+        assert_eq!(r, ScopeCheck::Allow);
     }
 
     #[tokio::test]
