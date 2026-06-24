@@ -44,6 +44,7 @@ import { trelloPermissions } from "./trello";
 import { mondayPermissions } from "./monday";
 import { vercelPermissions } from "./vercel";
 import { zoomPermissions } from "./zoom";
+import { zoomUserPermissions } from "./zoom-user";
 
 const permissionRegistry = new Map<string, AppPermissionDefinition>();
 
@@ -95,3 +96,4 @@ register(trelloPermissions);
 register(mondayPermissions);
 register(vercelPermissions);
 register(zoomPermissions);
+register(zoomUserPermissions);

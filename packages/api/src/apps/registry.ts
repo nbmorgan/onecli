@@ -40,6 +40,7 @@ import { monday } from "./monday";
 import { vercel } from "./vercel";
 import { jfrogArtifactory } from "./jfrog-artifactory";
 import { zoom } from "./zoom";
+import { zoomUser } from "./zoom-user";
 
 const staticApps: AppDefinition[] = [
   gmail,
@@ -81,6 +82,7 @@ const staticApps: AppDefinition[] = [
   vercel,
   jfrogArtifactory,
   zoom,
+  zoomUser,
 ];
 
 const CLOUD_HIDDEN_APPS = new Set(["jfrog-artifactory"]);

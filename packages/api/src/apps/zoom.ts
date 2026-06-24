@@ -104,9 +104,10 @@ const exchangeCredentials = async (
 
 export const zoom: AppDefinition = {
   id: "zoom",
-  name: "Zoom",
+  name: "Zoom S2S",
   icon: "/icons/zoom.svg",
-  description: "Meetings, webinars, users, and cloud recordings.",
+  description:
+    "Meetings, webinars, users, recordings, and AI Companion summaries via Server-to-Server OAuth. Use Zoom User for Docs / My Notes.",
   connectionMethod: {
     type: "credentials_import",
     fields: [

@@ -238,6 +238,18 @@ static LINKEDIN_REFRESH: RefreshConfig = RefreshConfig {
     client_auth: ClientCredentialMethod::Body,
 };
 
+/// Refresh config for Zoom user-level OAuth (the "zoom-user" / General app).
+/// Zoom requires client credentials via Basic auth and rotates the refresh
+/// token on every refresh — the gateway persists the rotated token (connect.rs).
+/// Distinct from the S2S "zoom" provider, which has no refresh token.
+static ZOOM_USER_REFRESH: RefreshConfig = RefreshConfig {
+    token_url: "https://zoom.us/oauth/token",
+    client_id_env: "ZOOM_USER_CLIENT_ID",
+    client_secret_env: "ZOOM_USER_CLIENT_SECRET",
+    body_format: TokenBodyFormat::Form,
+    client_auth: ClientCredentialMethod::BasicAuth,
+};
+
 // ── Provider registry ──────────────────────────────────────────────────
 
 static APP_PROVIDERS: &[AppProvider] = &[
@@ -1109,7 +1121,7 @@ static APP_PROVIDERS: &[AppProvider] = &[
     },
     AppProvider {
         provider: "zoom",
-        display_name: "Zoom",
+        display_name: "Zoom S2S",
         host_rules: &[HostRule {
             pattern: HostPattern::Exact("api.zoom.us"),
             path_prefix: None,
@@ -1121,6 +1133,34 @@ static APP_PROVIDERS: &[AppProvider] = &[
         // Refresh is handled by the "zoom_s2s" credential type (see
         // `try_refresh_credentials`), not the standard refresh_token flow.
         refresh: None,
+        metadata_headers: &[],
+        credential_headers: &[],
+        credential_params: &[],
+        host_rewrite: None,
+        finalizer: None,
+        body_transform: None,
+    },
+    AppProvider {
+        provider: "zoom-user",
+        display_name: "Zoom User",
+        // Shares api.zoom.us with the S2S "zoom" provider. Zoom only grants the
+        // `docs:*` scopes to a General (user-level OAuth) app, so Zoom Docs /
+        // My Notes require this connection while S2S keeps meetings, recordings,
+        // and summaries. Both are catch-all (no path prefix): the surfaces
+        // overlap (e.g. /v2/docs/archives works on S2S too), so the disambiguator
+        // is the credential identity, not the path. When an agent holds both
+        // connections, the client selects via x-onecli-connection-id; otherwise
+        // the gateway returns MultipleProviders for the client to pick.
+        host_rules: &[HostRule {
+            pattern: HostPattern::Exact("api.zoom.us"),
+            path_prefix: None,
+            strategy: AuthStrategy::Bearer,
+            intercept: false,
+            credential_host_field: None,
+        }],
+        // Standard authorization_code refresh_token flow (Zoom rotates the
+        // refresh token; the gateway persists it).
+        refresh: Some(&ZOOM_USER_REFRESH),
         metadata_headers: &[],
         credential_headers: &[],
         credential_params: &[],
@@ -3099,8 +3139,40 @@ mod tests {
 
     #[test]
     fn provider_for_host_zoom() {
+        // Host-only match returns the first registered provider (S2S).
         let result = provider_for_host("api.zoom.us");
-        assert_eq!(result, Some(("zoom", "Zoom")));
+        assert_eq!(result, Some(("zoom", "Zoom S2S")));
+    }
+
+    #[test]
+    fn zoom_host_has_both_providers() {
+        let providers = providers_for_host("api.zoom.us");
+        assert!(providers.contains(&"zoom"), "S2S provider present");
+        assert!(providers.contains(&"zoom-user"), "user provider present");
+    }
+
+    #[test]
+    fn zoom_user_uses_basic_auth_refresh() {
+        let config = refresh_config("zoom-user").expect("zoom-user should have refresh config");
+        assert_eq!(config.token_url, "https://zoom.us/oauth/token");
+        assert!(matches!(
+            config.client_auth,
+            ClientCredentialMethod::BasicAuth
+        ));
+        assert!(matches!(config.body_format, TokenBodyFormat::Form));
+    }
+
+    #[test]
+    fn zoom_user_api_uses_bearer() {
+        let injections = build_app_injections("zoom-user", "api.zoom.us", "zu_test123");
+        assert_eq!(injections.len(), 1);
+        assert_eq!(
+            injections[0],
+            Injection::SetHeader {
+                name: "authorization".to_string(),
+                value: "Bearer zu_test123".to_string(),
+            }
+        );
     }
 
     #[test]
