@@ -387,7 +387,10 @@ export const AgentCard = ({ agent, autoOpenAccess }: AgentCardProps) => {
             </div>
           </div>
           <DialogFooter>
-            <Button onClick={() => setTokenDialogOpen(false)} className="w-full">
+            <Button
+              onClick={() => setTokenDialogOpen(false)}
+              className="w-full"
+            >
               Done
             </Button>
           </DialogFooter>
