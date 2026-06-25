@@ -51,6 +51,12 @@ RUN pnpm install --frozen-lockfile
 FROM base AS builder
 ENV NEXT_TELEMETRY_DISABLED=1
 
+# Stamp the build version into the web bundle (shown in the dashboard and
+# reported by /api/health). Pass e.g. --build-arg APP_VERSION=1.2.3 (or an image
+# tag); defaults to the monorepo package.json version when unset.
+ARG APP_VERSION=""
+ENV APP_VERSION=$APP_VERSION
+
 COPY --from=deps /app/ .
 COPY --from=pruner /app/out/full/ .
 RUN pnpm --filter @onecli/db generate
