@@ -1151,13 +1151,27 @@ static APP_PROVIDERS: &[AppProvider] = &[
         // is the credential identity, not the path. When an agent holds both
         // connections, the client selects via x-onecli-connection-id; otherwise
         // the gateway returns MultipleProviders for the client to pick.
-        host_rules: &[HostRule {
-            pattern: HostPattern::Exact("api.zoom.us"),
-            path_prefix: None,
-            strategy: AuthStrategy::Bearer,
-            intercept: false,
-            credential_host_field: None,
-        }],
+        //
+        // Zoom's hosted MCP server (mcp-us.zoom.us) authenticates with the same
+        // user-level OAuth Bearer token, so it injects from this connection too.
+        // The MCP exposes the AI Companion "My Notes"/transcript content that the
+        // REST Docs API does not (search_zoom -> get_file_content).
+        host_rules: &[
+            HostRule {
+                pattern: HostPattern::Exact("api.zoom.us"),
+                path_prefix: None,
+                strategy: AuthStrategy::Bearer,
+                intercept: false,
+                credential_host_field: None,
+            },
+            HostRule {
+                pattern: HostPattern::Exact("mcp-us.zoom.us"),
+                path_prefix: None,
+                strategy: AuthStrategy::Bearer,
+                intercept: false,
+                credential_host_field: None,
+            },
+        ],
         // Standard authorization_code refresh_token flow (Zoom rotates the
         // refresh token; the gateway persists it).
         refresh: Some(&ZOOM_USER_REFRESH),
@@ -3171,6 +3185,26 @@ mod tests {
             Injection::SetHeader {
                 name: "authorization".to_string(),
                 value: "Bearer zu_test123".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn zoom_mcp_host_routes_to_user_provider() {
+        // Zoom's hosted MCP authenticates with the same user OAuth token.
+        let result = provider_for_host("mcp-us.zoom.us");
+        assert_eq!(result, Some(("zoom-user", "Zoom User")));
+    }
+
+    #[test]
+    fn zoom_mcp_host_uses_bearer() {
+        let injections = build_app_injections("zoom-user", "mcp-us.zoom.us", "zu_mcp123");
+        assert_eq!(injections.len(), 1);
+        assert_eq!(
+            injections[0],
+            Injection::SetHeader {
+                name: "authorization".to_string(),
+                value: "Bearer zu_mcp123".to_string(),
             }
         );
     }

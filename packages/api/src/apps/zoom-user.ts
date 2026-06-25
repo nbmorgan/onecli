@@ -30,6 +30,11 @@ export const zoomUser: AppDefinition = {
       "docs:read:file",
       "docs:read:list_children",
       "docs:read:export",
+      // AI Companion — required for Zoom's hosted MCP (mcp-us.zoom.us), the only
+      // route to "My Notes" / transcript content (search_zoom -> get_file_content).
+      "ai_companion:read:search",
+      "meeting:read:search",
+      "meeting:read:assets",
     ],
     permissions: [
       {
@@ -61,6 +66,26 @@ export const zoomUser: AppDefinition = {
         name: "Create export jobs",
         description: "Start export jobs to retrieve doc content",
         access: "write",
+      },
+      {
+        scope: "ai_companion:read:search",
+        name: "AI Companion search",
+        description:
+          "Search Team Chat, Docs, and My Notes (Zoom MCP search_zoom)",
+        access: "read",
+      },
+      {
+        scope: "meeting:read:search",
+        name: "Meeting search",
+        description: "AI Companion semantic meeting search (Zoom MCP)",
+        access: "read",
+      },
+      {
+        scope: "meeting:read:assets",
+        name: "Meeting assets",
+        description:
+          "Read meeting summary, recording, and linked docs (Zoom MCP get_meeting_assets)",
+        access: "read",
       },
     ],
     buildAuthUrl: ({ appCredentials, redirectUri, scopes, state }) => {
