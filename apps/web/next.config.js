@@ -1,7 +1,28 @@
-import { readdirSync } from "node:fs";
+import { readdirSync, readFileSync } from "node:fs";
 import path from "node:path";
 
 const isCloud = process.env.NEXT_PUBLIC_EDITION === "cloud";
+
+// Build version shown in the dashboard and reported by /api/health. Prefer an
+// explicit build tag (ONECLI_VERSION / APP_VERSION, e.g. a custom image tag),
+// else fall back to the monorepo package.json version. process.cwd() is
+// apps/web during `next build`/`next dev`.
+const resolveAppVersion = () => {
+  if (process.env.ONECLI_VERSION) return process.env.ONECLI_VERSION;
+  if (process.env.APP_VERSION) return process.env.APP_VERSION;
+  try {
+    const pkg = JSON.parse(
+      readFileSync(
+        path.join(process.cwd(), "..", "..", "package.json"),
+        "utf8",
+      ),
+    );
+    return pkg.version || "dev";
+  } catch {
+    return "dev";
+  }
+};
+const appVersion = resolveAppVersion();
 
 // Dashboard paths that cloud intentionally serves at the SAME bare URL as OSS (shared).
 // Empty today: cloud namespaces every dashboard feature under /p, /org, /account, so no
@@ -33,6 +54,7 @@ const nextConfig = {
   serverExternalPackages: ["@onecli/db", "@1password/sdk"],
   env: {
     NEXT_PUBLIC_EDITION: process.env.NEXT_PUBLIC_EDITION || "oss",
+    NEXT_PUBLIC_APP_VERSION: appVersion,
     NEXT_PUBLIC_API_URL: process.env.API_DOMAIN
       ? `${isCloud && process.env.NODE_ENV !== "development" ? "https" : "http"}://${process.env.API_DOMAIN}`
       : "http://localhost:10255",

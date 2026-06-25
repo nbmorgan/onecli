@@ -2,6 +2,7 @@
 
 import { useCounts } from "@/hooks/use-counts";
 import { PageHeader } from "@dashboard/page-header";
+import { APP_VERSION } from "@/lib/version";
 import { ApiKeyCard } from "./api-key-card";
 import { StatsCards } from "./stats-cards";
 import { RecentActivityCard } from "./recent-activity-card";
@@ -25,6 +26,9 @@ export const OverviewContent = () => {
         loading={loading}
       />
       <RecentActivityCard />
+      <p className="text-muted-foreground/70 mt-auto pt-2 text-xs">
+        OneCLI v{APP_VERSION}
+      </p>
     </div>
   );
 };
