@@ -42,6 +42,7 @@ import { jfrogArtifactory } from "./jfrog-artifactory";
 import { affine } from "./affine";
 import { zoom } from "./zoom";
 import { fireflies } from "./fireflies";
+import { zoomUser } from "./zoom-user";
 
 const staticApps: AppDefinition[] = [
   gmail,
@@ -85,6 +86,7 @@ const staticApps: AppDefinition[] = [
   affine,
   zoom,
   fireflies,
+  zoomUser,
 ];
 
 const CLOUD_HIDDEN_APPS = new Set(["jfrog-artifactory"]);

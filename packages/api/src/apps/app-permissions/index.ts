@@ -51,6 +51,7 @@ import { vercelPermissions } from "./vercel";
 import { affinePermissions } from "./affine";
 import { zoomPermissions } from "./zoom";
 import { firefliesPermissions } from "./fireflies";
+import { zoomUserPermissions } from "./zoom-user";
 
 const permissionRegistry = new Map<string, AppPermissionDefinition>();
 
@@ -104,3 +105,4 @@ register(vercelPermissions);
 register(affinePermissions);
 register(zoomPermissions);
 register(firefliesPermissions);
+register(zoomUserPermissions);
