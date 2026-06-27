@@ -49,6 +49,7 @@ export const googleDrivePermissions: AppPermissionDefinition = {
           description: "Upload a new file to Google Drive",
           hostPattern: "www.googleapis.com",
           pathPattern: "/drive/v3/files",
+          aliasPatterns: ["/upload/drive/v3/files"],
           method: "POST",
           // Folder creates share this endpoint; exclude them so a "create file"
           // rule does not also govern "create folder".
@@ -75,6 +76,7 @@ export const googleDrivePermissions: AppPermissionDefinition = {
             "Edit an existing file's content or metadata (not folder moves)",
           hostPattern: "www.googleapis.com",
           pathPattern: "/drive/v3/files/*",
+          aliasPatterns: ["/upload/drive/v3/files/*"],
           method: "PATCH",
           // Parent changes (moves) hit the same PATCH; exclude them so a generic
           // update rule is separable from move_file.
