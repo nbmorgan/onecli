@@ -14,7 +14,7 @@
 //! - [`response`]: pre-built gateway error responses
 
 mod body;
-#[cfg(feature = "cloud")]
+#[cfg(edition_cloud)]
 #[path = "cloud/response.rs"]
 mod cloud_response;
 // OSS-only: Google Drive folder-scope enforcement. The cloud build enforces
@@ -24,9 +24,9 @@ mod drive_scope;
 mod finalizers;
 pub(crate) mod forward;
 mod hints;
-#[cfg(not(feature = "cloud"))]
+#[cfg(edition_oss)]
 pub(crate) mod hooks;
-#[cfg(feature = "cloud")]
+#[cfg(edition_cloud)]
 #[path = "cloud/hooks.rs"]
 pub(crate) mod hooks;
 mod mitm;
@@ -406,8 +406,11 @@ impl GatewayServer {
 
 // ── Axum route handlers ─────────────────────────────────────────────────
 
-async fn healthz() -> StatusCode {
-    StatusCode::OK
+async fn healthz() -> axum::Json<serde_json::Value> {
+    axum::Json(serde_json::json!({
+        "status": "ok",
+        "version": crate::version::app_version(),
+    }))
 }
 
 /// Protected: returns the authenticated user's ID.
@@ -1519,6 +1522,16 @@ mod tests {
         // Non-PEM input (e.g. a wrong/empty file) yields nothing and never panics.
         assert!(parse_ca_pem_bundle(b"not a pem at all").is_empty());
         assert!(parse_ca_pem_bundle(b"").is_empty());
+    }
+
+    #[tokio::test]
+    async fn healthz_reports_status_and_version() {
+        let axum::Json(body) = healthz().await;
+        assert_eq!(body["status"], "ok");
+        assert!(
+            body["version"].as_str().is_some_and(|v| !v.is_empty()),
+            "healthz must report a non-empty version string",
+        );
     }
 
     /// Verify that the production HTTP client does not follow redirects.

@@ -54,7 +54,6 @@ export interface Secret {
   pathPattern: string | null;
   injectionConfig: unknown;
   metadata: Record<string, unknown> | null;
-  isPlatform: boolean;
   scope: string | null;
   createdAt: string;
 }

@@ -80,6 +80,11 @@ ENV HOSTNAME="0.0.0.0"
 ENV AUTH_TRUST_HOST=true
 ENV NEXTAUTH_URL=http://localhost:10254
 
+# Build version read by the bundled gateway at runtime (empty → gateway falls back
+# to its compile-time crate version).
+ARG APP_VERSION=""
+ENV APP_VERSION=${APP_VERSION}
+
 # Gateway binary from Rust build
 COPY --from=gateway-builder /build/target/release/onecli-gateway /usr/local/bin/onecli-gateway
 

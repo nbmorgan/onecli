@@ -2,7 +2,7 @@
 
 import { useCounts } from "@/hooks/use-counts";
 import { PageHeader } from "@dashboard/page-header";
-import { APP_VERSION } from "@/lib/version";
+import { APP_VERSION } from "@/lib/env";
 import { ApiKeyCard } from "./api-key-card";
 import { StatsCards } from "./stats-cards";
 import { RecentActivityCard } from "./recent-activity-card";

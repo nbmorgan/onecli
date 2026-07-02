@@ -3,9 +3,11 @@ import path from "node:path";
 
 const isCloud = process.env.NEXT_PUBLIC_EDITION === "cloud";
 
-// Build version shown in the dashboard and reported by /api/health. Prefer an
-// explicit build tag (ONECLI_VERSION / APP_VERSION, e.g. a custom image tag),
-// else fall back to the monorepo package.json version. process.cwd() is
+// Build-time app version, exposed to the app as NEXT_PUBLIC_APP_VERSION (client +
+// server, inlined by Next). Self-host prefers an explicit build tag
+// (ONECLI_VERSION, e.g. a custom image tag); cloud stamps APP_VERSION (semver +
+// short git sha, e.g. "1.38.0+f6cca6e5") as a build arg; OSS / local falls back
+// to the monorepo root package.json version, else "dev". process.cwd() is
 // apps/web during `next build`/`next dev`.
 const resolveAppVersion = () => {
   if (process.env.ONECLI_VERSION) return process.env.ONECLI_VERSION;
@@ -46,6 +48,38 @@ const getOssDashboardSegments = () => {
   }
 };
 
+// Cloud edition swaps these web import paths to cloud implementations (turbopack
+// resolveAlias, applied only when isCloud). The canonical key list is mirrored in
+// packages/api/src/lib/edition.ts (CLOUD_ALIAS_KEYS) — kept here too because this
+// config runs in plain Node and can't import that TypeScript module. A future
+// onprem edition would select a subset of these here.
+const CLOUD_ALIASES = {
+  "@/lib/auth/auth-provider": "@/cloud/auth/cognito-provider",
+  "@/lib/auth/auth-server": "@/cloud/auth/cognito-server",
+  "@/lib/actions/resolve-user": "@/cloud/auth/resolve-user",
+  "@/lib/nav-config": "@/cloud/nav-config",
+  "@dashboard/dashboard-sidebar": "@/cloud/dashboard/dashboard-sidebar",
+  "@dashboard/dashboard-header": "@/cloud/dashboard/dashboard-header",
+  "@/lib/gateway-auth": "@/cloud/gateway-auth",
+  "@/lib/auth/login-content": "@/cloud/auth/login-content",
+  "@/lib/user-plan": "@/cloud/user-plan",
+  "@/lib/components/request-app-slot": "@/cloud/apps/request-app-slot",
+  "@/lib/home-redirect": "@/cloud/home-redirect",
+  "@/lib/components/pro-app-dialog": "@/cloud/apps/pro-app-dialog",
+  "@/lib/components/condition-builder": "@/cloud/components/condition-builder",
+  "@/lib/dashboard/session-redirect": "@/cloud/dashboard/session-redirect",
+  "@/lib/granular-access": "@/cloud/granular-access",
+  "@/lib/plan-gate": "@/cloud/billing/plan-gate",
+
+  // Cloud initialization (api, server actions, client)
+  "@/lib/init/api": "@/cloud/init/api",
+  "@/lib/init/server": "@/cloud/init/server",
+  "@/lib/init/client": "@/cloud/init/client",
+
+  // Cloud API fetch (Bearer token auth for external api-server)
+  "@/lib/api-fetch": "@/cloud/api-fetch",
+};
+
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   output: "standalone",
@@ -79,36 +113,7 @@ const nextConfig = {
       : "http://localhost:10255",
   },
   turbopack: {
-    resolveAlias: isCloud
-      ? {
-          "@/lib/auth/auth-provider": "@/cloud/auth/cognito-provider",
-          "@/lib/auth/auth-server": "@/cloud/auth/cognito-server",
-          "@/lib/actions/resolve-user": "@/cloud/auth/resolve-user",
-          "@/lib/nav-config": "@/cloud/nav-config",
-          "@dashboard/dashboard-sidebar": "@/cloud/dashboard/dashboard-sidebar",
-          "@dashboard/dashboard-header": "@/cloud/dashboard/dashboard-header",
-          "@/lib/gateway-auth": "@/cloud/gateway-auth",
-          "@/lib/auth/login-content": "@/cloud/auth/login-content",
-          "@/lib/user-plan": "@/cloud/user-plan",
-          "@/lib/components/request-app-slot": "@/cloud/apps/request-app-slot",
-          "@/lib/home-redirect": "@/cloud/home-redirect",
-          "@/lib/components/pro-app-dialog": "@/cloud/apps/pro-app-dialog",
-          "@/lib/components/condition-builder":
-            "@/cloud/components/condition-builder",
-          "@/lib/dashboard/session-redirect":
-            "@/cloud/dashboard/session-redirect",
-          "@/lib/granular-access": "@/cloud/granular-access",
-          "@/lib/plan-gate": "@/cloud/billing/plan-gate",
-
-          // Cloud initialization (api, server actions, client)
-          "@/lib/init/api": "@/cloud/init/api",
-          "@/lib/init/server": "@/cloud/init/server",
-          "@/lib/init/client": "@/cloud/init/client",
-
-          // Cloud API fetch (Bearer token auth for external api-server)
-          "@/lib/api-fetch": "@/cloud/api-fetch",
-        }
-      : {},
+    resolveAlias: isCloud ? CLOUD_ALIASES : {},
   },
   async rewrites() {
     // Cloud ships the OSS bare dashboard routes too (cloud may only add files), but only
